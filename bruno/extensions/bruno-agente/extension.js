@@ -221,6 +221,9 @@ async function primeiraVez(ctx) {
 }
 
 async function activate(ctx) {
+  // Durante o build o instalador abre o editor só para gerar um cache; nesse modo não ligamos nada
+  // (um processo filho vivo trava a limpeza de arquivos temporários no Windows).
+  if (process.env.VSCODE_GENERATE_NODE_COMPILE_CACHE) return;
   extPath = ctx.extensionPath || "";
   canal = vscode.window.createOutputChannel("Bruno IDE - Roteador");
   barra = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
