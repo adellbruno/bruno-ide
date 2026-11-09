@@ -1,0 +1,77 @@
+{
+  "name": "bruno-agente",
+  "displayName": "Bruno IDE - Agente e Roteador",
+  "description": "Liga o roteador de IA (chaves, GGUF, troca automática) e deixa o agente autônomo pronto para uso.",
+  "version": "1.0.0",
+  "publisher": "bruno-ide",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "brunoIde.cadastrarChave",
+        "title": "Bruno IDE: Cadastrar chave de API"
+      },
+      {
+        "command": "brunoIde.abrirPainel",
+        "title": "Bruno IDE: Abrir painel do roteador"
+      },
+      {
+        "command": "brunoIde.editarConfig",
+        "title": "Bruno IDE: Editar configuração (provedores, modelos, GGUF)"
+      },
+      {
+        "command": "brunoIde.reiniciar",
+        "title": "Bruno IDE: Reiniciar roteador"
+      },
+      {
+        "command": "brunoIde.configurarAgente",
+        "title": "Bruno IDE: Reconfigurar o agente"
+      },
+      {
+        "command": "brunoIde.pastaModelos",
+        "title": "Bruno IDE: Abrir pasta de modelos locais (GGUF)"
+      },
+      {
+        "command": "brunoIde.instalarLlama",
+        "title": "Bruno IDE: Baixar suporte a modelos locais (llama-server)"
+      }
+    ],
+    "configuration": {
+      "title": "Bruno IDE",
+      "properties": {
+        "brunoIde.autonomia": {
+          "type": "string",
+          "enum": [
+            "alta",
+            "media",
+            "perguntar"
+          ],
+          "default": "alta",
+          "description": "alta: o agente lê, escreve e executa comandos permitidos sozinho. media: escreve sozinho, pergunta antes de executar. perguntar: pede aprovação para tudo."
+        },
+        "brunoIde.iniciarRoteador": {
+          "type": "boolean",
+          "default": true,
+          "description": "Liga o roteador automaticamente quando o editor abre."
+        },
+        "brunoIde.comandoRoteador": {
+          "type": "string",
+          "default": "",
+          "description": "Avançado: caminho de outro executável do roteador (ex.: python app.py). Vazio usa o que veio no instalador."
+        }
+      }
+    }
+  }
+}

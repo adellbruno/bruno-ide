@@ -1,0 +1,118 @@
+# ============================================================
+#  CONFIGURAÇÃO DO ROTEADOR  (normalmente você NÃO precisa mexer aqui)
+#  As chaves ficam no arquivo .env ou no cofre do sistema (python app.py --chaves).
+#  Provedor sem chave é ignorado. O arquivo é recarregado sozinho ao salvar.
+# ============================================================
+
+porta: 8082
+dados: dados                 # pasta do estado, histórico e backups (sem textos de pedidos)
+
+seguranca:
+  token_local: true          # só quem tem o token usa o roteador (os scripts de início cuidam disso)
+
+provedores:
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    variavel_env: GEMINI_API_KEYS
+    # limite_diario: 900          # pedidos por dia, por chave (confira o limite atual no site do Google)
+    # limite_por_minuto: 10       # evita gastar tentativa com erro 429
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    variavel_env: GROQ_API_KEYS
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    variavel_env: OPENROUTER_API_KEYS
+    cabecalhos: {"HTTP-Referer": "http://localhost", "X-Title": "Roteador de IA"}
+  deepseek:
+    base_url: https://api.deepseek.com
+    variavel_env: DEEPSEEK_API_KEYS
+    pago: true
+    # limite_gasto_dia_usd: 2     # ao chegar, o roteador para de usar e pede liberação no painel
+    # limite_gasto_mes_usd: 20    # (precisa de "preco_milhao" nos modelos abaixo)
+  nvidia:
+    base_url: https://integrate.api.nvidia.com/v1
+    variavel_env: NVIDIA_API_KEYS
+  anthropic:                   # opcional: Claude oficial só para tarefas difíceis
+    tipo: anthropic
+    base_url: https://api.anthropic.com
+    variavel_env: ANTHROPIC_REAL_API_KEYS
+    pago: true
+  # Outro provedor compatível com OpenAI? Copie um bloco, mude nome, base_url e variavel_env.
+
+# Cada nível é uma lista em ORDEM DE PREFERÊNCIA. Se o primeiro falhar ou estourar a cota,
+# o roteador passa ao próximo. Nomes de modelo envelhecem: rode "python app.py --modelos".
+# Campos opcionais por modelo:
+#   tools: false             modelo que não chama ferramentas (só atende perguntas sem agente)
+#   preco_milhao: [3, 15]    US$ por milhão de tokens [entrada, saída], para controlar gasto
+niveis:
+  simples:        # tarefas leves: listar, explicar, ler, pequenas edições
+    - {provedor: gemini,     modelo: gemini-2.5-flash-lite,        contexto: 1000000, max_tokens: 8192}
+    - {provedor: groq,       modelo: llama-3.3-70b-versatile,      contexto: 128000,  max_tokens: 8192}
+    - {provedor: openrouter, modelo: "qwen/qwen3-coder:free",      contexto: 128000,  max_tokens: 8192}
+    - {provedor: nvidia,     modelo: meta/llama-3.3-70b-instruct,  contexto: 128000,  max_tokens: 8192}
+  medio:          # criar funções, ajustar código, tarefas normais de programação
+    - {provedor: gemini,     modelo: gemini-2.5-flash,             contexto: 1000000, max_tokens: 8192}
+    - {provedor: deepseek,   modelo: deepseek-chat,                contexto: 120000,  max_tokens: 8192}
+    - {provedor: openrouter, modelo: "qwen/qwen3-coder:free",      contexto: 128000,  max_tokens: 8192}
+    - {provedor: nvidia,     modelo: meta/llama-3.3-70b-instruct,  contexto: 128000,  max_tokens: 8192}
+  complexo:       # arquitetura, bugs difíceis, refatorações grandes
+    - {provedor: anthropic,  modelo: claude-sonnet-5-5,            contexto: 200000,  max_tokens: 32000}
+    - {provedor: gemini,     modelo: gemini-2.5-pro,               contexto: 1000000, max_tokens: 16000}
+    - {provedor: deepseek,   modelo: deepseek-chat,                contexto: 120000,  max_tokens: 8192}
+    - {provedor: deepseek,   modelo: deepseek-reasoner,            contexto: 120000,  max_tokens: 8192}
+
+# ---------------------------------------------------------------- modelos locais (GGUF)
+# Coloque arquivos .gguf na pasta "modelos" e ligue aqui. O roteador inicia o llama-server sozinho.
+# Antes: python app.py --hardware (diz que tamanho cabe) e python app.py --instalar-llama
+local:
+  ativo: false
+  uso: reserva               # reserva = só quando a nuvem falha | principal = tenta o local primeiro
+                             # so_privado = só para dados sensíveis (#local)
+  pasta_modelos: modelos
+  servidor: ""               # caminho do llama-server, se não for achado sozinho
+  porta: 8091
+  modelos: []
+  # modelos:
+  #   - {arquivo: qwen2.5-coder-7b-instruct-q4_k_m.gguf, nivel: simples, contexto: 16384}
+
+# ---------------------------------------------------------------- privacidade
+# Procura nas mensagens (inclusive em arquivos lidos) número de processo CNJ, CPF, CNPJ, conta
+# bancária e telefone. Se achar, o pedido só vai para o modelo local. #liberar permite o envio externo.
+# Atenção: o detector acha o que tem formato conhecido; o nome de uma parte, sozinho, passa.
+privacidade:
+  ativo: true
+  detectar: [processo, cpf, cnpj, conta, telefone]   # também existe: email
+  pastas_protegidas: []      # ex.: ["crm_juridico", "C:/Users/voce/Processos"]
+  sem_local: bloquear        # sem modelo local: bloquear (recusa) ou avisar (deixa sair e registra)
+
+# ---------------------------------------------------------------- economia de tokens
+# modo: desligado | leve (corta resultados enormes antigos) | forte (leve + ferramentas enxutas
+# + resumo de conversa longa) | personalizado (use os itens abaixo). Ligue um de cada vez.
+economia:
+  modo: desligado
+  cortar_resultados: {ativo: false, antigos_chars: 12000, recente_chars: 40000}
+  ferramentas_enxutas: {ativo: false, max: 18}
+  compactar_conversa: {ativo: false, a_partir_de_tokens: 60000, manter_ultimas: 10}
+  cache_respostas: {ativo: false, segundos: 300}
+  # referencia_preco: {entrada: 3.0, saida: 15.0}   # US$/milhão de um modelo pago, p/ estimar a economia
+
+roteamento:
+  # Marcas na mensagem: forçam o nível. #economico #equilibrado #qualidade mudam o perfil.
+  # #local usa só o modelo local; #liberar permite enviar dado sensível à nuvem; #nocache ignora o cache.
+  atalhos: {"#rapido": simples, "#medio": medio, "#pro": complexo}
+  medio_a_partir_de: 1
+  complexo_a_partir_de: 3
+  palavras_complexas: [refator, arquitetur, bug, debug, erro, traceback, exception, otimiz,
+                       performance, segurança, migra, concorrên, race condition, refactor,
+                       architecture, design, algoritmo, não funciona, nao funciona]
+  palavras_simples: [liste, listar, explique, "o que faz", leia, abra, renomeie, comente,
+                     traduza, git status, resuma, formate]
+  escalada: {ativo: true, falhas_seguidas: 2, descer_apos_sucessos: 6}
+  classificador_llm: {ativo: false, timeout_s: 8}   # usa um modelo barato quando a pontuação é duvidosa
+  distribuir_carga: true     # manda para o fim da fila quem está com a cota quase no fim
+  cota_baixa_abaixo_de: 0.25
+
+verificar_modelos: avisar    # avisar | pular (ignora sozinho modelo que sumiu) | desligado
+
+alertas:
+  cota_percentual: 80
