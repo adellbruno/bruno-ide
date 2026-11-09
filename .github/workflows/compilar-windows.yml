@@ -146,6 +146,9 @@ jobs:
         run: ./build/windows/package.sh
 
       - name: Prepare assets
+        env:
+          SHOULD_BUILD_MSI: 'no'
+          SHOULD_BUILD_MSI_NOUP: 'no'
         run: ./prepare_assets.sh
         if: github.event.inputs.generate_assets == 'true'
 
