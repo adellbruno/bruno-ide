@@ -13,7 +13,6 @@ env:
   APP_NAME: BrunoIDE
   DISABLE_UPDATE: yes
   BINARY_NAME: brunoide
-  DISABLE_UPDATE: yes
   GH_REPO_PATH: ${{ github.repository }}
   GITHUB_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.head }}
   ORG_NAME: BrunoIDE
