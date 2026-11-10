@@ -7,6 +7,13 @@ on:
         type: boolean
         description: Gerar os instaladores
         default: true
+      incluir_cuda:
+        type: choice
+        description: Embutir o llama.cpp com CUDA (placas NVIDIA; deixa o instalador bem maior). O Vulkan, que também serve para NVIDIA, sempre vai.
+        default: 'sim'
+        options:
+          - 'sim'
+          - 'nao'
 
 env:
   APP_NAME: BrunoIDE
@@ -66,6 +73,15 @@ jobs:
           (cd roteador && python -m PyInstaller --noconfirm --distpath ../bruno/extensions/bruno-agente/bin --workpath ../_pyi_work roteador.spec)
           ls -la bruno/extensions/bruno-agente/bin
           bruno/extensions/bruno-agente/bin/roteador* --url
+
+      - name: Embutir llama.cpp (modelos GGUF) e Git
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INCLUIR_CUDA: ${{ github.event.inputs.incluir_cuda || 'sim' }}
+        run: |
+          chmod +x bruno/fetch_binarios.sh
+          bruno/fetch_binarios.sh windows bruno/extensions/bruno-agente/bin
 
       - name: Build
         env:
@@ -146,9 +162,6 @@ jobs:
         run: ./build/windows/package.sh
 
       - name: Prepare assets
-        env:
-          SHOULD_BUILD_MSI: 'no'
-          SHOULD_BUILD_MSI_NOUP: 'no'
         run: ./prepare_assets.sh
         if: github.event.inputs.generate_assets == 'true'
 

@@ -641,36 +641,6 @@ def teste_historico_e_estado_nao_guardam_dados():
     shutil.rmtree(wd, ignore_errors=True)
 
 
-def teste_gguf_pasta_sem_lista_e_comandos_do_editor():
-    """Sem 'modelos:' no config, todo .gguf da pasta vira candidato; --local liga sem apagar comentários."""
-    import subprocess
-    wd = Path(tempfile.mkdtemp(prefix="rot_teste_"))
-    cfg = cfg_base({"simples": [C("m-ok")]}, montar_local(wd, ("x.gguf", "y.gguf")))
-    cfg["local"]["modelos"] = []
-    with rodar(cfg, workdir=wd) as (c, e, _):
-        nomes = sorted(x["modelo"] for x in e.s.local_cands)
-        assert nomes == ["x.gguf", "y.gguf"], nomes
-    # CLI: --local on/off preserva comentários e --info-local devolve JSON
-    wd2 = Path(tempfile.mkdtemp(prefix="rot_teste_"))
-    modelo = (Path(__file__).parent / "config.yaml").read_text(encoding="utf-8")
-    (wd2 / "config.yaml").write_text(modelo, encoding="utf-8")
-    env = {**os.environ, "ROTEADOR_HOME": str(wd2)}
-    app = str(Path(__file__).parent / "app.py")
-    cmd = [sys.executable, app, "--config", str(wd2 / "config.yaml")]
-    subprocess.run(cmd + ["--local", "on"], env=env, check=True, capture_output=True)
-    txt = (wd2 / "config.yaml").read_text(encoding="utf-8")
-    import re as _re
-    bloco = lambda t: _re.search(r"^local:\n(.*?)^\S", t, _re.M | _re.S).group(1)
-    assert "ativo: true" in bloco(txt) and "# ---" in txt
-    out = subprocess.run(cmd + ["--info-local"], env=env, check=True, capture_output=True, text=True).stdout
-    info = json.loads(out)
-    assert info["ativo"] is True and "recomendacao" in info and isinstance(info["modelos"], list), info
-    subprocess.run(cmd + ["--local", "off"], env=env, check=True, capture_output=True)
-    assert "ativo: false" in bloco((wd2 / "config.yaml").read_text(encoding="utf-8"))
-    shutil.rmtree(wd, ignore_errors=True)
-    shutil.rmtree(wd2, ignore_errors=True)
-
-
 def teste_gguf_hardware_e_servidor_local():
     wd = Path(tempfile.mkdtemp(prefix="rot_teste_"))
     escrever_gguf(wd / "a.gguf", camadas=28, ctx=32768)

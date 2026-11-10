@@ -69,9 +69,10 @@ DEFAULTS = {
         "sem_local": "bloquear",  # bloquear | avisar (avisar = deixa sair, só registra)
     },
     "local": {
-        "ativo": False,
+        "ativo": "auto",  # auto = liga sozinho quando houver um .gguf na pasta | true | false
         "uso": "reserva",  # reserva | principal | so_privado
         "servidor": "",
+        "variante": "auto",  # auto | cuda | vulkan | cpu (qual llama.cpp embutido usar)
         "pasta_modelos": "modelos",
         "porta": 8091,
         "espera_s": 180,
@@ -183,8 +184,19 @@ class Settings:
         env.update(os.environ)
         return env
 
+    @staticmethod
+    def _stat_dir(d):
+        try:
+            return (d.stat().st_mtime, len(list(d.glob("*.gguf"))))
+        except OSError:
+            return (0, 0)
+
     def _stamp(self):
         out = []
+        cfg = getattr(self, "cfg", None)
+        if cfg:  # a pasta de modelos entra na conta: colocar/tirar um .gguf recarrega sozinho
+            pm = Path((cfg.get("local") or {}).get("pasta_modelos") or "modelos")
+            out.append(self._stat_dir(pm if pm.is_absolute() else self.base / pm))
         for p in (self.config_path, self.env_file):
             try:
                 out.append(p.stat().st_mtime)
@@ -212,20 +224,25 @@ class Settings:
 
         local = cfg["local"]
         local_cands = []
-        if local.get("ativo"):
+        pasta = Path(local.get("pasta_modelos") or "modelos")
+        if not pasta.is_absolute():
+            pasta = self.base / pasta
+        gguf = sorted(pasta.glob("*.gguf")) if pasta.is_dir() else []
+        ativo = local.get("ativo", False)
+        if isinstance(ativo, str):
+            ativo = ativo.strip().lower()
+            ativo = bool(gguf) if ativo == "auto" else ativo in ("true", "sim", "yes", "on", "1")
+        local["ativo"] = bool(ativo)  # daqui para frente é sempre verdadeiro/falso
+        if local["ativo"]:
             porta = int(local.get("porta", 8091))
             providers["local"] = Provider(
                 "local",
                 {"base_url": f"http://127.0.0.1:{porta}/v1", "local": True, "usage_em_stream": True},
                 ["local"],
             )
-            pasta = Path(local.get("pasta_modelos") or "modelos")
-            if not pasta.is_absolute():
-                pasta = self.base / pasta
             lista = list(local.get("modelos") or [])
-            if not lista and pasta.is_dir():  # sem lista no config: usa todo .gguf que estiver na pasta
-                lista = [{"arquivo": f.name, "nivel": local.get("nivel_padrao", "simples"),
-                          "contexto": int(local.get("contexto_padrao", 16384))} for f in sorted(pasta.glob("*.gguf"))]
+            if not lista:  # sem lista no config: usa todos os .gguf da pasta
+                lista = [{"arquivo": g.name, "nivel": "medio", "contexto": 32768, "max_tokens": 4096} for g in gguf]
             for m in lista:
                 arq = Path(m["arquivo"])
                 if not arq.is_absolute():

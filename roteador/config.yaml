@@ -62,18 +62,22 @@ niveis:
     - {provedor: deepseek,   modelo: deepseek-reasoner,            contexto: 120000,  max_tokens: 8192}
 
 # ---------------------------------------------------------------- modelos locais (GGUF)
-# Coloque arquivos .gguf na pasta "modelos" e ligue aqui. O roteador inicia o llama-server sozinho.
-# Antes: python app.py --hardware (diz que tamanho cabe) e python app.py --instalar-llama
+# O llama.cpp (llama-server) já vem dentro do Bruno IDE. Basta colocar um arquivo .gguf na pasta
+# "modelos" (comando "Bruno IDE: Abrir pasta de modelos locais (GGUF)"): o roteador percebe sozinho,
+# liga o modelo e usa a placa de vídeo quando couber. Não precisa editar mais nada aqui.
+# Para ver que tamanho de modelo cabe no seu computador: python app.py --hardware
 local:
-  ativo: false
+  ativo: auto                # auto = liga sozinho se houver .gguf na pasta | true | false
   uso: reserva               # reserva = só quando a nuvem falha | principal = tenta o local primeiro
                              # so_privado = só para dados sensíveis (#local)
   pasta_modelos: modelos
-  servidor: ""               # caminho do llama-server, se não for achado sozinho
+  variante: auto             # auto | cuda | vulkan | cpu  (qual llama.cpp usar; auto escolhe pela placa)
+  servidor: ""               # só se quiser usar OUTRO llama-server, que não o embutido
   porta: 8091
-  modelos: []
+  modelos: []                # vazio = usa todos os .gguf da pasta (contexto 32768)
+  # Para ajustar um modelo (nível, contexto, camadas na GPU):
   # modelos:
-  #   - {arquivo: qwen2.5-coder-7b-instruct-q4_k_m.gguf, nivel: simples, contexto: 16384}
+  #   - {arquivo: qwen2.5-coder-7b-instruct-q4_k_m.gguf, nivel: medio, contexto: 32768, gpu_camadas: auto}
 
 # ---------------------------------------------------------------- privacidade
 # Procura nas mensagens (inclusive em arquivos lidos) número de processo CNJ, CPF, CNPJ, conta

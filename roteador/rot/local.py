@@ -165,22 +165,80 @@ def plano_de_carga(cand, hw):
     return {"ngl": ngl, "ctx": ctx, "camadas": camadas, "tamanho_gb": tam}
 
 
-def achar_servidor(cfg_local):
-    cand = []
+def _exe_nome():
+    return "llama-server.exe" if sys.platform.startswith("win") else "llama-server"
+
+
+def ordem_variantes(hw, preferida="auto"):
+    """Ordem de tentativa das variantes embutidas do llama.cpp (pastas cuda, vulkan, cpu)."""
+    todas = ["cuda", "vulkan", "cpu"]
+    if preferida in todas:
+        return [preferida] + [v for v in todas if v != preferida]
+    if "NVIDIA" in ((hw or {}).get("gpu") or "").upper():
+        return ["cuda", "vulkan", "cpu"]
+    return ["vulkan", "cpu", "cuda"]  # AMD/Intel/sem placa: Vulkan (cai para CPU sozinho), depois CPU
+
+
+def achar_servidores(cfg_local, hw=None):
+    """Todos os llama-server utilizáveis, do mais indicado ao menos.
+
+    Ordem: caminho em local.servidor, variantes embutidas no instalador (BRUNO_LLAMA_DIR, escolhidas pela
+    placa de vídeo), pasta llama.cpp baixada por --instalar-llama e, por fim, o que estiver no PATH.
+    """
+    exe = _exe_nome()
+    achados = []
+
+    def add(p):
+        p = Path(p)
+        if p.is_file() and str(p) not in achados:
+            achados.append(str(p))
+
     if cfg_local.get("servidor"):
-        cand.append(Path(cfg_local["servidor"]))
-    exe = "llama-server.exe" if sys.platform.startswith("win") else "llama-server"
+        add(cfg_local["servidor"])
+    emb = os.environ.get("BRUNO_LLAMA_DIR")
+    if emb and Path(emb).is_dir():
+        hw = hw if hw is not None else hardware()
+        for v in ordem_variantes(hw, str(cfg_local.get("variante", "auto")).lower()):
+            d = Path(emb) / v
+            if (d / exe).is_file():
+                add(d / exe)
+            elif d.is_dir():
+                for p in sorted(d.rglob(exe)):
+                    add(p)
+        if (Path(emb) / exe).is_file():  # pacote solto, sem subpastas de variante
+            add(Path(emb) / exe)
     for pasta in (BASE / "llama.cpp", BASE / "llama", BASE / "bin", BASE):
-        cand.append(pasta / exe)
-    for p in cand:
-        if p.exists() and p.is_file():
-            return str(p)
+        add(pasta / exe)
     pasta = BASE / "llama.cpp"  # o pacote baixado costuma ter subpastas
     if pasta.exists():
-        for p in pasta.rglob(exe):
-            if p.is_file():
-                return str(p)
-    return shutil.which("llama-server")
+        for p in sorted(pasta.rglob(exe)):
+            add(p)
+    no_path = shutil.which("llama-server")
+    if no_path:
+        add(no_path)
+    return achados
+
+
+def achar_servidor(cfg_local):
+    achados = achar_servidores(cfg_local)
+    return achados[0] if achados else None
+
+
+def _lancar(exe, args):
+    """Inicia o llama-server na pasta dele (as DLLs/.so ficam ao lado) e sem janela."""
+    pasta = str(Path(exe).parent)
+    env = dict(os.environ)
+    if sys.platform.startswith("linux"):
+        env["LD_LIBRARY_PATH"] = pasta + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+    kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": pasta, "env": env}
+    if sys.platform.startswith("win"):
+        kw["creationflags"] = 0x08000000  # sem janela
+    elif os.access(exe, os.X_OK) is False:
+        try:
+            os.chmod(exe, os.stat(exe).st_mode | 0o111)
+        except OSError:
+            pass
+    return subprocess.Popen([exe] + args, **kw)
 
 
 # ------------------------------------------------------------------ gerenciador
@@ -207,41 +265,51 @@ class LocalManager:
                 return
             self._parar()
             cfg = self.s.cfg["local"]
-            exe = achar_servidor(cfg)
-            if not exe:
-                self._falha("llama-server não encontrado. Rode: python app.py --instalar-llama "
+            self.hw = self.hw or hardware()
+            exes = achar_servidores(cfg, self.hw)
+            if not exes:
+                self._falha("llama-server não encontrado. Ele deveria vir dentro do Bruno IDE; se você montou o "
+                            "editor sem o passo de embutir, rode: python app.py --instalar-llama "
                             "(ou indique o caminho em local.servidor no config.yaml)")
             if not Path(cand["arquivo"]).exists():
                 self._falha(f"arquivo de modelo não encontrado: {cand['arquivo']}")
-            self.hw = self.hw or hardware()
             plano = plano_de_carga(cand, self.hw)
             porta = int(cfg.get("porta", 8091))
-            cmd = [exe, "-m", cand["arquivo"], "--host", "127.0.0.1", "--port", str(porta),
-                   "-c", str(plano["ctx"]), "-ngl", str(plano["ngl"]), "--jinja"]
-            log(f"[local] iniciando {cand['modelo']} (camadas na GPU: {plano['ngl']}, contexto: {plano['ctx']})")
-            self.estado = "iniciando"
-            try:
-                kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-                if sys.platform.startswith("win"):
-                    kw["creationflags"] = 0x08000000  # sem janela
-                self.proc = subprocess.Popen(cmd, **kw)
-            except OSError as e:
-                self._falha(f"não consegui iniciar o llama-server: {e}")
-            limite = time.time() + float(cfg.get("espera_s", 180))
-            while time.time() < limite:
-                if self.proc.poll() is not None:
-                    self._falha("o llama-server fechou ao iniciar (modelo grande demais para a memória?)")
+            args = ["-m", cand["arquivo"], "--host", "127.0.0.1", "--port", str(porta),
+                    "-c", str(plano["ctx"]), "-ngl", str(plano["ngl"]), "--jinja"]
+            ultimo_erro = "o llama-server fechou ao iniciar (modelo grande demais para a memória?)"
+            for exe in exes:  # se uma variante (ex.: CUDA sem driver) não abre, tenta a próxima
+                variante = Path(exe).parent.name
+                log(f"[local] iniciando {cand['modelo']} com {variante} "
+                    f"(camadas na GPU: {plano['ngl']}, contexto: {plano['ctx']})")
+                self.estado = "iniciando"
                 try:
-                    r = await self.client.get(f"http://127.0.0.1:{porta}/health", timeout=3)
-                    if r.status_code == 200:
-                        self.atual, self.estado, self.erro = cand["arquivo"], "pronto", None
-                        log(f"[local] {cand['modelo']} pronto")
-                        return
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(1)
-            self._parar()
-            self._falha("o servidor local demorou demais para ficar pronto")
+                    self.proc = _lancar(exe, args)
+                except OSError as e:
+                    ultimo_erro = f"não consegui iniciar o llama-server ({variante}): {e}"
+                    log(f"[!] local: {ultimo_erro}")
+                    continue
+                limite = time.time() + float(cfg.get("espera_s", 180))
+                while time.time() < limite:
+                    if self.proc.poll() is not None:
+                        ultimo_erro = (f"o llama-server ({variante}) fechou ao iniciar "
+                                       "(modelo grande demais para a memória ou driver da placa incompatível?)")
+                        log(f"[!] local: {ultimo_erro}")
+                        break
+                    try:
+                        r = await self.client.get(f"http://127.0.0.1:{porta}/health", timeout=3)
+                        if r.status_code == 200 and self.proc.poll() is None:
+                            self.atual, self.estado, self.erro = cand["arquivo"], "pronto", None
+                            log(f"[local] {cand['modelo']} pronto ({variante})")
+                            return
+                    except httpx.HTTPError:
+                        pass
+                    await asyncio.sleep(1)
+                else:
+                    self._parar()
+                    self._falha("o servidor local demorou demais para ficar pronto")
+                self.proc = None
+            self._falha(ultimo_erro)
 
     def _falha(self, msg):
         self.estado, self.erro = "erro", msg

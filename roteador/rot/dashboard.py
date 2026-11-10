@@ -115,7 +115,7 @@ function render(d){
   const lc=[];
   if(L.hardware){lc.push(el('div',{},'RAM: '+(L.hardware.ram_gb||'?')+' GB · Placa de vídeo: '+(L.hardware.gpu?L.hardware.gpu+' ('+L.hardware.vram_gb+' GB)':'não detectada')));}
   if(L.recomendacao)lc.push(el('div',{class:'mut'},L.recomendacao));
-  lc.push(el('div',{},'Modelo local: '+(L.ativo?('estado '+L.estado+(L.modelo?' · '+L.modelo:'')):'desligado (local.ativo no config.yaml)')));
+  lc.push(el('div',{},'Modelo local: '+(L.ativo?('estado '+L.estado+(L.modelo?' · '+L.modelo:'')):'desligado (coloque um arquivo .gguf na pasta de modelos locais)')));
   if(L.erro)lc.push(el('div',{class:'bad'},L.erro));
   $('#local').replaceChildren(...lc);
   const P=d.privacidade;

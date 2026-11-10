@@ -75,6 +75,14 @@ jobs:
           ls -la bruno/extensions/bruno-agente/bin
           bruno/extensions/bruno-agente/bin/roteador* --url
 
+      - name: Embutir llama.cpp (modelos GGUF) e Git
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x bruno/fetch_binarios.sh
+          bruno/fetch_binarios.sh linux bruno/extensions/bruno-agente/bin
+
       - name: Build
         env:
           SHOULD_BUILD: yes

@@ -19,3 +19,6 @@ stores/snapcraft/insider/*.snap
 stores/snapcraft/stable/*.snap
 font-size/node_modules/
 font-size/generate-css.js
+
+# binários embutidos no build (roteador, llama.cpp, git): gerados, não versionar
+bruno/extensions/bruno-agente/bin/
