@@ -2,7 +2,7 @@
   "name": "bruno-agente",
   "displayName": "Bruno IDE - Agente e Roteador",
   "description": "Liga o roteador de IA (chaves, GGUF, troca automática) e deixa o agente autônomo pronto para uso.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "bruno-ide",
   "engines": {
     "vscode": "^1.90.0"
@@ -46,6 +46,18 @@
       {
         "command": "brunoIde.instalarLlama",
         "title": "Bruno IDE: Baixar suporte a modelos locais (llama-server)"
+      },
+      {
+        "command": "brunoIde.inicio",
+        "title": "Bruno IDE: Abrir tela inicial"
+      },
+      {
+        "command": "brunoIde.modeloLocal",
+        "title": "Bruno IDE: Modelo local (GGUF) - instalar e gerenciar"
+      },
+      {
+        "command": "brunoIde.agente",
+        "title": "Bruno IDE: Conversar com o agente"
       }
     ],
     "configuration": {
@@ -70,8 +82,31 @@
           "type": "string",
           "default": "",
           "description": "Avançado: caminho de outro executável do roteador (ex.: python app.py). Vazio usa o que veio no instalador."
+        },
+        "brunoIde.idiomaPortugues": {
+          "type": "boolean",
+          "default": true,
+          "description": "Instala e usa o idioma português do Brasil no editor."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "bruno-ide",
+          "title": "Bruno IDE",
+          "icon": "media/icone.svg"
+        }
+      ]
+    },
+    "views": {
+      "bruno-ide": [
+        {
+          "type": "webview",
+          "id": "brunoIde.inicio",
+          "name": "Início"
+        }
+      ]
     }
   }
 }

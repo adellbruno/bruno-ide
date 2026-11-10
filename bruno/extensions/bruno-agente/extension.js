@@ -2,9 +2,11 @@
 const vscode = require("vscode");
 const cp = require("child_process");
 const fs = require("fs");
-const http = require("http");
 const os = require("os");
+const https = require("https");
+const http = require("http");
 const path = require("path");
+const htmlInicio = require("./inicio.js");
 
 const PORTA = 8082;
 const AGENTE_ID = "RooVeterinaryInc.roo-cline";
@@ -23,6 +25,14 @@ let canal = null;
 let timer = null;
 let tokenCache = null;
 let extPath = "";
+let viewInicio = null;
+
+const MODELOS = [
+  { bi: 1.5, nome: "Qwen2.5-Coder 1.5B (muito leve, só tarefas simples)", gb: 1.1, arq: "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf", repo: "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF" },
+  { bi: 3, nome: "Qwen2.5-Coder 3B (leve)", gb: 2.1, arq: "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf", repo: "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF" },
+  { bi: 7, nome: "Qwen2.5-Coder 7B (equilibrado, recomendado)", gb: 4.7, arq: "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", repo: "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF" },
+  { bi: 14, nome: "Qwen2.5-Coder 14B (mais capaz, pede máquina forte)", gb: 9.0, arq: "Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf", repo: "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF" },
+];
 
 function pastaRoteador() {
   const raiz = process.platform === "win32" ? process.env.APPDATA : path.join(os.homedir(), ".config");
@@ -103,6 +113,7 @@ function atualizarBarra(ativo, texto) {
 async function monitorar() {
   const ativo = await ping();
   atualizarBarra(ativo);
+  enviarStatus();
   if (!ativo && vscode.workspace.getConfiguration("brunoIde").get("iniciarRoteador")) iniciarRoteador(false);
 }
 
@@ -141,7 +152,14 @@ async function configurarAgente(avisar) {
         },
       },
     },
-    globalSettings: perfilAutonomia(nivel),
+    globalSettings: {
+      ...perfilAutonomia(nivel),
+      language: "pt-BR",
+      customInstructions:
+        "Responda sempre em português do Brasil, em linguagem simples, sem jargão desnecessário. " +
+        "Ao terminar uma tarefa, diga em poucas linhas o que foi feito e como usar. " +
+        "Quando criar um programa, teste-o antes de dizer que está pronto e ofereça gerar o executável ou instalador.",
+    },
   };
   const pasta = pastaRoteador();
   fs.mkdirSync(pasta, { recursive: true });
@@ -220,6 +238,230 @@ async function primeiraVez(ctx) {
   }
 }
 
+// ------------------------------------------------------------------ tela inicial
+function contarChaves() {
+  try {
+    const txt = fs.readFileSync(path.join(pastaRoteador(), ".env"), "utf8");
+    let n = 0;
+    for (const l of txt.split(/\r?\n/)) {
+      const m = l.match(/^[A-Z_]+_KEYS=(.*)$/);
+      if (m) n += m[1].split(",").map((x) => x.trim()).filter(Boolean).length;
+    }
+    return n;
+  } catch (_) { return 0; }
+}
+
+function localLigado() {
+  try {
+    const txt = fs.readFileSync(path.join(pastaRoteador(), "config.yaml"), "utf8");
+    const m = txt.match(/^local:\s*(?:#.*)?\n([\s\S]*?)^\S/m);
+    return !!(m && /^\s+ativo:\s*true/m.test(m[1]));
+  } catch (_) { return false; }
+}
+
+async function enviarStatus() {
+  if (!viewInicio) return;
+  viewInicio.webview.postMessage({ tipo: "status", roteador: await ping(), chaves: contarChaves(), local: localLigado() });
+}
+
+function criarViewInicio(ctx) {
+  const provedor = {
+    resolveWebviewView(view) {
+      viewInicio = view;
+      view.webview.options = { enableScripts: true };
+      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      view.webview.html = htmlInicio(nonce);
+      view.webview.onDidReceiveMessage(async (m) => {
+        const mapa = {
+          agente: "brunoIde.agente", chave: "brunoIde.cadastrarChave", gguf: "brunoIde.modeloLocal",
+          painel: "brunoIde.abrirPainel", config: "brunoIde.editarConfig",
+        };
+        if (m.cmd === "pronto") return enviarStatus();
+        if (m.cmd === "novoProjeto") return vscode.commands.executeCommand("workbench.action.files.openFolder");
+        if (m.cmd === "explorador") return vscode.commands.executeCommand("workbench.view.explorer");
+        if (mapa[m.cmd]) return vscode.commands.executeCommand(mapa[m.cmd]);
+      });
+      view.onDidDispose(() => { if (viewInicio === view) viewInicio = null; });
+    },
+  };
+  ctx.subscriptions.push(vscode.window.registerWebviewViewProvider("brunoIde.inicio", provedor));
+}
+
+async function abrirAgente() {
+  if (!vscode.extensions.getExtension(AGENTE_ID)) {
+    const r = await vscode.window.showWarningMessage("O agente ainda não está instalado. Instalar agora?", "Instalar", "Cancelar");
+    if (r === "Instalar") await vscode.commands.executeCommand("workbench.extensions.installExtension", AGENTE_ID);
+    return;
+  }
+  await vscode.commands.executeCommand("workbench.view.extension.roo-cline-ActivityBar");
+}
+
+// ------------------------------------------------------------------ modelo local (GGUF)
+function baixarArquivo(url, destino, progresso, cancelar, redirecoes = 0) {
+  return new Promise((ok, falha) => {
+    if (redirecoes > 6) return falha(new Error("redirecionamentos demais"));
+    const req = (url.startsWith("http:") ? http : https).get(url, { headers: { "User-Agent": "BrunoIDE" } }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        return baixarArquivo(new URL(res.headers.location, url).toString(), destino, progresso, cancelar, redirecoes + 1).then(ok, falha);
+      }
+      if (res.statusCode !== 200) { res.resume(); return falha(new Error("HTTP " + res.statusCode)); }
+      const total = Number(res.headers["content-length"] || 0);
+      let lido = 0;
+      const parcial = destino + ".parte";
+      const saida = fs.createWriteStream(parcial);
+      cancelar.onCancellationRequested(() => { req.destroy(new Error("cancelado")); });
+      res.on("data", (c) => { lido += c.length; progresso(lido, total); });
+      res.pipe(saida);
+      saida.on("finish", () => { try { fs.renameSync(parcial, destino); ok(); } catch (e) { falha(e); } });
+      res.on("error", falha); saida.on("error", falha);
+    });
+    req.on("error", (e) => { try { fs.unlinkSync(destino + ".parte"); } catch (_) {} falha(e); });
+  });
+}
+
+function rodarComSaida(exe, args) {
+  return new Promise((ok) => {
+    const p = cp.spawn(exe.cmd, args, { env: ambiente(), shell: exe.shell, windowsHide: true });
+    let saida = "";
+    p.stdout.on("data", (d) => { saida += d; canal.append(String(d)); });
+    p.stderr.on("data", (d) => { saida += d; canal.append(String(d)); });
+    p.on("error", () => ok({ codigo: -1, saida }));
+    p.on("close", (c) => ok({ codigo: c, saida }));
+  });
+}
+
+async function infoLocal(exe) {
+  try { return JSON.parse(await rodar(exe, ["--info-local"])); } catch (e) { canal.appendLine("info-local: " + e); return null; }
+}
+
+async function garantirMotor(exe, info) {
+  if (info && info.servidor) return true;
+  const r = await vscode.window.showInformationMessage(
+    "Falta o \"motor\" que executa modelos GGUF (llama-server, programa gratuito e de código aberto). Baixar agora? (cerca de 30 a 200 MB)",
+    "Baixar motor", "Cancelar");
+  if (r !== "Baixar motor") return false;
+  canal.show(true);
+  const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Baixando o motor de modelos locais..." },
+    () => rodarComSaida(exe, ["--instalar-llama"]));
+  const novo = await infoLocal(exe);
+  if (novo && novo.servidor) { vscode.window.showInformationMessage("Motor instalado."); return true; }
+  const o = await vscode.window.showErrorMessage(
+    "Não consegui instalar o motor automaticamente. Baixe o pacote do seu sistema em github.com/ggml-org/llama.cpp/releases e extraia na pasta do roteador.",
+    "Abrir página de downloads", "Ver detalhes");
+  if (o === "Abrir página de downloads") vscode.env.openExternal(vscode.Uri.parse("https://github.com/ggml-org/llama.cpp/releases"));
+  if (o === "Ver detalhes") canal.show(true);
+  return false;
+}
+
+async function ativarLocal(exe) {
+  await rodar(exe, ["--local", "on"]);
+  const uso = await vscode.window.showQuickPick([
+    { label: "Só quando a internet ou as chaves falharem", description: "reserva (recomendado)", v: "reserva" },
+    { label: "Sempre que possível, antes da nuvem", description: "principal", v: "principal" },
+    { label: "Só para dados sensíveis (CPF, processos...)", description: "privado", v: "so_privado" },
+  ], { placeHolder: "Quando usar o modelo local?" });
+  if (uso) await rodar(exe, ["--local-uso", uso.v]);
+  await iniciarRoteador(true);
+  enviarStatus();
+}
+
+async function modeloLocal() {
+  const exe = exeRoteador();
+  if (!exe) return vscode.window.showWarningMessage("Roteador não encontrado.");
+  const info = await infoLocal(exe);
+  if (!info) return vscode.window.showErrorMessage("Não consegui ler o estado do modelo local. Veja o painel 'Bruno IDE - Roteador'.");
+  const resumo = info.modelos.length ? info.modelos.length + " modelo(s) instalado(s)" : "nenhum modelo instalado";
+  const itens = [
+    { label: "$(cloud-download) Baixar um modelo recomendado para o meu computador", detail: info.recomendacao.texto, id: "baixar" },
+    { label: "$(file-add) Usar um arquivo .gguf que eu já tenho", detail: "Você escolhe o arquivo e ele é copiado para a pasta de modelos.", id: "arquivo" },
+    { label: info.servidor ? "$(tools) Reinstalar o motor (llama-server)" : "$(tools) Instalar o motor (llama-server) - necessário", detail: info.servidor || "Programa que executa os modelos. Gratuito.", id: "motor" },
+    { label: info.ativo ? "$(circle-slash) Desligar o modelo local" : "$(play) Ligar o modelo local", detail: "Agora: " + (info.ativo ? "ligado" : "desligado") + " | " + resumo, id: "alternar" },
+    { label: "$(folder-opened) Abrir a pasta de modelos", detail: info.pasta_modelos, id: "pasta" },
+  ];
+  const esc = await vscode.window.showQuickPick(itens, { placeHolder: "Modelo local (GGUF): o que você quer fazer?", matchOnDetail: true });
+  if (!esc) return;
+
+  if (esc.id === "pasta") { fs.mkdirSync(info.pasta_modelos, { recursive: true }); return vscode.env.openExternal(vscode.Uri.file(info.pasta_modelos)); }
+  if (esc.id === "motor") { await garantirMotor(exe, { servidor: null }); return; }
+  if (esc.id === "alternar") {
+    if (!info.ativo && !info.modelos.length) return vscode.window.showWarningMessage("Instale um modelo primeiro (opção 'Baixar um modelo recomendado').");
+    await rodar(exe, ["--local", info.ativo ? "off" : "on"]);
+    await iniciarRoteador(true); enviarStatus();
+    return vscode.window.showInformationMessage("Modelo local " + (info.ativo ? "desligado." : "ligado."));
+  }
+
+  fs.mkdirSync(info.pasta_modelos, { recursive: true });
+  if (esc.id === "arquivo") {
+    const f = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { "Modelos GGUF": ["gguf"] }, openLabel: "Usar este modelo" });
+    if (!f || !f[0]) return;
+    const destino = path.join(info.pasta_modelos, path.basename(f[0].fsPath));
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Copiando o modelo..." },
+      async () => { await fs.promises.copyFile(f[0].fsPath, destino); });
+  } else {
+    const maximo = info.recomendacao.bilhoes || 3;
+    let lista = MODELOS.filter((m) => m.bi <= maximo);
+    if (!lista.length) lista = [MODELOS[0]];
+    const melhor = lista[lista.length - 1];
+    const m = await vscode.window.showQuickPick(lista.map((x) => ({
+      label: x.nome + (x === melhor ? "  (indicado para você)" : ""),
+      detail: "Download de cerca de " + x.gb + " GB. Exige ~" + (x.gb + 1.5).toFixed(0) + " GB de memória livre.", x })),
+      { placeHolder: "Qual modelo baixar? " + info.recomendacao.texto });
+    if (!m) return;
+    const x = m.x;
+    const destino = path.join(info.pasta_modelos, x.arq);
+    const url = "https://huggingface.co/" + x.repo + "/resolve/main/" + x.arq;
+    if (!fs.existsSync(destino)) {
+      try {
+        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Baixando " + x.nome, cancellable: true },
+          async (prog, cancelar) => {
+            let ultimo = 0;
+            await baixarArquivo(url, destino, (lido, total) => {
+              const pct = total ? Math.floor((lido / total) * 100) : 0;
+              if (pct > ultimo) { prog.report({ increment: pct - ultimo, message: pct + "% (" + (lido / 1e9).toFixed(2) + " GB)" }); ultimo = pct; }
+            }, cancelar);
+          });
+      } catch (e) {
+        canal.appendLine("download: " + e);
+        const o = await vscode.window.showErrorMessage("Não consegui baixar o modelo (" + e.message + "). Você pode baixar o arquivo pelo navegador e usar a opção 'Usar um arquivo .gguf que eu já tenho'.",
+          "Abrir página do modelo");
+        if (o) vscode.env.openExternal(vscode.Uri.parse("https://huggingface.co/" + x.repo));
+        return;
+      }
+    }
+  }
+  const info2 = await infoLocal(exe);
+  if (!(await garantirMotor(exe, info2))) {
+    vscode.window.showWarningMessage("O modelo foi salvo, mas ainda falta o motor. Rode de novo 'Modelo local (GGUF)' e escolha 'Instalar o motor'.");
+    return;
+  }
+  await ativarLocal(exe);
+  vscode.window.showInformationMessage("Modelo local pronto! Ele será usado conforme você escolheu. Dá para mudar a qualquer momento nesta mesma opção.");
+}
+
+// ------------------------------------------------------------------ idioma português
+function garantirIdioma(ctx) {
+  const cfg = vscode.workspace.getConfiguration("brunoIde");
+  if (!cfg.get("idiomaPortugues") || ctx.globalState.get("idiomaConfigurado")) return;
+  try {
+    const arq = path.join(os.homedir(), ".brunoide", "argv.json");
+    fs.mkdirSync(path.dirname(arq), { recursive: true });
+    let txt = fs.existsSync(arq) ? fs.readFileSync(arq, "utf8") : "";
+    if (!/^\s*"locale"\s*:/m.test(txt)) {
+      txt = txt.trim() ? txt.replace("{", '{\n\t"locale": "pt-br",') : '{\n\t"locale": "pt-br"\n}\n';
+      fs.writeFileSync(arq, txt, "utf8");
+    }
+  } catch (e) { canal.appendLine("idioma: " + e); }
+  const id = "MS-CEINTL.vscode-language-pack-pt-br";
+  Promise.resolve(vscode.extensions.getExtension(id) ? null : vscode.commands.executeCommand("workbench.extensions.installExtension", id))
+    .then(async () => {
+      await ctx.globalState.update("idiomaConfigurado", true);
+      const r = await vscode.window.showInformationMessage("Idioma português instalado. Recarregue para ver o editor em português.", "Recarregar agora");
+      if (r) vscode.commands.executeCommand("workbench.action.reloadWindow");
+    })
+    .catch((e) => canal.appendLine("pacote de idioma: " + e));
+}
+
 async function activate(ctx) {
   // Durante o build o instalador abre o editor só para gerar um cache; nesse modo não ligamos nada
   // (um processo filho vivo trava a limpeza de arquivos temporários no Windows).
@@ -233,7 +475,11 @@ async function activate(ctx) {
   ctx.subscriptions.push(canal, barra);
 
   const reg = (id, fn) => ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  reg("brunoIde.cadastrarChave", cadastrarChave);
+  criarViewInicio(ctx);
+  reg("brunoIde.inicio", () => vscode.commands.executeCommand("workbench.view.extension.bruno-ide"));
+  reg("brunoIde.agente", abrirAgente);
+  reg("brunoIde.modeloLocal", modeloLocal);
+  reg("brunoIde.cadastrarChave", async () => { await cadastrarChave(); enviarStatus(); });
   reg("brunoIde.abrirPainel", abrirPainel);
   reg("brunoIde.reiniciar", async () => { atualizarBarra(false, "reiniciando"); await iniciarRoteador(true); monitorar(); });
   reg("brunoIde.configurarAgente", () => configurarAgente(true));
@@ -261,6 +507,11 @@ async function activate(ctx) {
   await monitorar();
   timer = setInterval(monitorar, 15000);
   ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
+  garantirIdioma(ctx);
+  if (!ctx.globalState.get("inicioAberto")) {
+    await ctx.globalState.update("inicioAberto", true);
+    vscode.commands.executeCommand("workbench.view.extension.bruno-ide");
+  }
   primeiraVez(ctx);
 }
 
@@ -268,4 +519,4 @@ function deactivate() {
   if (processo) { try { processo.kill(); } catch (_) {} }
 }
 
-module.exports = { activate, deactivate };
+module.exports = { activate, deactivate, _teste: { baixarArquivo, contarChaves, localLigado } };

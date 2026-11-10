@@ -18,20 +18,32 @@ Você não precisa saber programar para seguir isto. O computador do GitHub (gr�
 
 ## Parte 2 - Primeiro uso
 
-1. Abra o **Bruno IDE**. Na barra inferior aparece **IA: ativo** (o roteador ligou sozinho).
-2. Uma janela pergunta se quer cadastrar chaves: clique em **Cadastrar chave**, escolha o provedor e cole a chave. Repita para cada uma (várias chaves do mesmo provedor funcionam, ele alterna). Depois, a qualquer momento: `Ctrl+Shift+P` > "Bruno IDE: Cadastrar chave de API".
-3. Na primeira abertura ele instala o agente sozinho (precisa de internet). Quando pedir, clique em **Recarregar agora**.
-4. Abra uma pasta vazia (File > Open Folder), clique no ícone do agente (foguete/canguru) na barra lateral e escreva o que quer. Exemplo: *"Crie um programa em Python com janela que leia uma planilha de processos e gere um relatório em PDF. Teste e gere o executável para Windows."*
-5. Clique na barra **IA: ativo** para abrir o painel (consumo, chaves, gastos).
+1. Abra o **Bruno IDE**. Na barra lateral esquerda aparece o ícone **Bruno IDE** (um chip): é a **tela inicial**, em português, com botões para tudo. Na barra de baixo, **IA: ativo** mostra que o roteador ligou sozinho.
+2. O editor instala sozinho o idioma **português do Brasil** e o agente (precisa de internet). Quando aparecer "Recarregar agora", clique. Na primeira vez pode pedir duas vezes.
+3. Clique em **Cadastrar chave de API** e cole suas chaves, uma por vez. Pode cadastrar várias do mesmo provedor: ele alterna sozinho.
+4. Clique em **Conversar com o agente** (ou no ícone do canguru). Abra antes uma pasta de projeto: **Arquivo > Abrir Pasta**.
+5. Escreva em português o que quer. Escolha o modo no painel do agente:
+   - **Perguntar**: só conversa e explica, não mexe em nada (é o "chat").
+   - **Código**: cria e edita arquivos e roda comandos.
+   - **Arquiteto**: planeja antes de programar.
+   - **Depurar**: acha e corrige erros.
+6. Exemplo: *"Crie um programa em Python com janela que leia uma planilha de processos e gere um relatório em PDF. Teste e gere o executável para Windows."*
+7. **Painel de consumo** (botão na tela inicial ou clique em "IA: ativo") mostra o uso de cada chave.
 
-## Modelos locais (GGUF)
-`Ctrl+Shift+P` > "Bruno IDE: Baixar suporte a modelos locais" (baixa o llama-server) > "Bruno IDE: Abrir pasta de modelos locais (GGUF)" e coloque o arquivo `.gguf` lá > "Bruno IDE: Editar configuração" e mude `local: ativo: true`. Reinicie o roteador pelo comando "Bruno IDE: Reiniciar roteador".
+## Modelo local (GGUF): botão "Instalar modelo local"
+Na tela inicial, clique em **Instalar modelo local (GGUF)**. O assistente:
+1. Mede o seu computador e diz que tamanho de modelo cabe.
+2. Oferece **baixar um modelo recomendado** (Qwen2.5-Coder, de 1,5 a 14 bilhões de parâmetros, só os que cabem na sua máquina) **ou usar um arquivo .gguf que você já tem**.
+3. Baixa o "motor" (llama-server) se faltar.
+4. Pergunta quando usar: só como reserva (padrão), sempre antes da nuvem, ou só para dados sensíveis.
+5. Liga o modo local e reinicia o roteador. Depois, pela mesma opção, dá para desligar, trocar ou abrir a pasta de modelos.
 
 ## Autonomia (importante)
 Por padrão o agente **executa comandos sozinho** (lista permitida: npm, python, pip, git, dotnet, cargo, etc.; comandos destrutivos ficam bloqueados). Para ele perguntar antes, mude em Configurações > "Bruno IDE: Autonomia" para `media` ou `perguntar`. Use sempre uma pasta de projeto separada e, de preferência, com git.
 
 ## Limites honestos
-- O editor **ainda não foi compilado nem aberto por mim** (o ambiente que uso não tem memória para isso). Testei: a extensão com um VS Code simulado, o roteador como executável, e a configuração do agente contra o validador do próprio Roo Code. O primeiro build real é a prova final.
-- O agente é o Roo Code (outro projeto). Com modelos gratuitos ou pequenos ele pode errar mais em tarefas grandes;.
+- O editor já foi compilado no GitHub e abre. As novidades desta atualização (tela inicial, assistente GGUF, idioma) foram testadas com um VS Code simulado e só terão a prova final no próximo build.
+- O agente é o Roo Code (outro projeto). Com modelos gratuitos ou pequenos ele pode errar mais em tarefas grandes.
 - Sem atualização automática: para atualizar, rode o workflow de novo.
 - Ícones ainda são os do VSCodium.
+- O download automático do motor (llama-server) e dos modelos (Hugging Face) foi escrito mas não pude testar contra a internet real daqui; se falhar, o assistente mostra o caminho manual.

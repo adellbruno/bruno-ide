@@ -244,3 +244,54 @@ def instalar_llama(settings):
     print(f"Pronto: {achou}" if achou else "Extraído, mas não achei o llama-server. Indique o caminho em local.servidor.")
     if achou and str(destino) not in achou:
         print(f"Se o roteador não o encontrar, ponha em local.servidor: {achou}")
+
+
+# ------------------------------------------------------------- uso pelo editor (JSON)
+def info_local(settings):
+    """Estado do modelo local em JSON, para a interface do editor."""
+    import json
+    hw = hardware()
+    r = recomendar(hw)
+    pasta = Path(settings.cfg["local"].get("pasta_modelos") or "modelos")
+    pasta = pasta if pasta.is_absolute() else settings.base / pasta
+    arquivos = sorted(pasta.glob("*.gguf")) if pasta.exists() else []
+    exe = achar_servidor(settings.cfg["local"])
+    print(json.dumps({
+        "ativo": bool(settings.cfg["local"].get("ativo")),
+        "uso": settings.cfg["local"].get("uso", "reserva"),
+        "hardware": hw, "recomendacao": r,
+        "servidor": str(exe) if exe else None,
+        "pasta_modelos": str(pasta),
+        "modelos": [{"arquivo": a.name, "tamanho_gb": round(a.stat().st_size / 1e9, 2)} for a in arquivos],
+    }, ensure_ascii=False))
+
+
+def editar_local(settings, chave, valor):
+    """Troca uma chave simples dentro da seção 'local:' do config.yaml, sem apagar os comentários."""
+    txt = settings.config_path.read_text(encoding="utf-8")
+    linhas = txt.splitlines()
+    dentro, feito = False, False
+    for i, ln in enumerate(linhas):
+        if re.match(r"^local:\s*(#.*)?$", ln):
+            dentro = True
+            continue
+        if dentro and ln and not ln.startswith((" ", "\t", "#")):
+            break
+        if dentro and re.match(rf"^\s+{re.escape(chave)}:\s*\S", ln):
+            linhas[i] = re.sub(rf"({re.escape(chave)}:\s*)([^\s#]+)", lambda m: m.group(1) + str(valor), ln, count=1)
+            feito = True
+            break
+    if not feito:
+        print(f"Não achei 'local: {chave}:' no config.yaml.")
+        sys.exit(1)
+    settings.config_path.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+
+
+def definir_local(settings, ligar):
+    editar_local(settings, "ativo", "true" if ligar else "false")
+    print("Modelo local " + ("ligado" if ligar else "desligado"))
+
+
+def definir_local_uso(settings, uso):
+    editar_local(settings, "uso", uso)
+    print(f"Modelo local será usado como: {uso}")

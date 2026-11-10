@@ -222,7 +222,11 @@ class Settings:
             pasta = Path(local.get("pasta_modelos") or "modelos")
             if not pasta.is_absolute():
                 pasta = self.base / pasta
-            for m in local.get("modelos") or []:
+            lista = list(local.get("modelos") or [])
+            if not lista and pasta.is_dir():  # sem lista no config: usa todo .gguf que estiver na pasta
+                lista = [{"arquivo": f.name, "nivel": local.get("nivel_padrao", "simples"),
+                          "contexto": int(local.get("contexto_padrao", 16384))} for f in sorted(pasta.glob("*.gguf"))]
+            for m in lista:
                 arq = Path(m["arquivo"])
                 if not arq.is_absolute():
                     arq = pasta / arq

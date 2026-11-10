@@ -187,6 +187,9 @@ def main():
     ap.add_argument("--verificar", action="store_true")
     ap.add_argument("--esperar", action="store_true")
     ap.add_argument("--url", action="store_true")
+    ap.add_argument("--info-local", action="store_true")
+    ap.add_argument("--local", choices=["on", "off"], default=None)
+    ap.add_argument("--local-uso", choices=["reserva", "principal", "so_privado"], default=None)
     ap.add_argument("--config", default=None)
     a = ap.parse_args()
 
@@ -214,6 +217,15 @@ def main():
                 pass
             time.sleep(0.5)
         sys.exit(1)
+    if a.info_local:
+        diag.info_local(settings)
+        return
+    if a.local:
+        diag.definir_local(settings, a.local == "on")
+        return
+    if a.local_uso:
+        diag.definir_local_uso(settings, a.local_uso)
+        return
     if a.chaves:
         diag.assistente_chaves(settings)
         return
